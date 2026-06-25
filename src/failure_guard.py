@@ -133,14 +133,28 @@ def _read_json_file(path: str) -> dict:
         return {}
 
 
-def _atomic_write_json(path: str, data: dict) -> None:
+def _atomic_write_json(
+    path: str,
+    data: dict,
+    *,
+    replace_retries: int = 5,
+    replace_retry_delay: float = 0.05,
+) -> None:
     _ensure_parent_dir(path)
     tmp = f"{path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2, sort_keys=True)
         f.flush()
         os.fsync(f.fileno())
-    os.replace(tmp, path)
+    attempts = max(1, replace_retries)
+    for attempt in range(attempts):
+        try:
+            os.replace(tmp, path)
+            return
+        except PermissionError:
+            if attempt >= attempts - 1:
+                raise
+            time.sleep(max(0, replace_retry_delay))
 
 
 @dataclass(frozen=True)
@@ -188,9 +202,9 @@ class FailureGuard:
 
     def _update_task(self, task_key: str, updater) -> dict:
         _ensure_parent_dir(self.path)
-        with open(self.path, "a+", encoding="utf-8") as fh:
+        lock_path = f"{self.path}.lock"
+        with open(lock_path, "a+", encoding="utf-8") as fh:
             with _FileLock(fh):
-                fh.seek(0)
                 data = self._load()
                 tasks = data.setdefault("tasks", {})
                 entry = tasks.get(task_key) or {}

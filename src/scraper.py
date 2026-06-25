@@ -60,6 +60,7 @@ from src.services.seller_profile_cache import SellerProfileCache
 from src.services.search_pagination import (
     advance_search_page,
     is_search_results_response,
+    wait_for_initial_search_response,
 )
 
 
@@ -329,7 +330,24 @@ def _build_context_overrides(snapshot: dict) -> dict:
 def _build_extra_headers(raw_headers: Optional[dict]) -> dict:
     if not raw_headers:
         return {}
-    excluded = {"cookie", "content-length"}
+    excluded = {
+        "accept",
+        "accept-encoding",
+        "connection",
+        "content-length",
+        "cookie",
+        "host",
+        "origin",
+        "referer",
+        "sec-ch-ua",
+        "sec-ch-ua-mobile",
+        "sec-ch-ua-platform",
+        "sec-fetch-dest",
+        "sec-fetch-mode",
+        "sec-fetch-site",
+        "sec-fetch-user",
+        "user-agent",
+    }
     headers = {}
     for key, value in raw_headers.items():
         if not key or key.lower() in excluded or value is None:
@@ -654,20 +672,14 @@ async def scrape_xianyu(task_config: dict, debug_limit: int = 0):
                 search_url = f"https://www.goofish.com/search?{urlencode(params)}"
                 log_time(f"目标URL: {search_url}")
 
-                # 先监听搜索接口响应，再执行导航，避免错过首次请求
-                async with page.expect_response(
-                    is_search_results_response, timeout=30000
-                ) as initial_response_info:
-                    await page.goto(
-                        search_url, wait_until="domcontentloaded", timeout=60000
-                    )
+                initial_response = await wait_for_initial_search_response(
+                    page=page,
+                    search_url=search_url,
+                )
                 if _is_login_url(page.url):
                     raise LoginRequiredError(
                         f"Login required: redirected to {page.url} (cookies/state likely expired)"
                     )
-
-                # 捕获初始搜索的API数据
-                initial_response = await initial_response_info.value
 
                 # 等待页面加载出关键筛选元素，以确认已成功进入搜索结果页
                 try:

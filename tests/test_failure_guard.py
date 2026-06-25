@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta
 
+import pytest
+
 from src.failure_guard import FailureGuard
+from src.failure_guard import _atomic_write_json
 
 
 def test_failure_guard_opens_circuit_after_threshold_and_rate_limits(tmp_path):
@@ -74,3 +77,42 @@ def test_failure_guard_auto_recovers_on_cookie_change(tmp_path):
         now=base + timedelta(minutes=1),
     )
     assert recovered.skip is False
+
+
+def test_atomic_write_json_retries_when_windows_replace_is_temporarily_locked(
+    tmp_path,
+    monkeypatch,
+):
+    guard_path = tmp_path / "guard.json"
+    original_replace = __import__("os").replace
+    calls = {"count": 0}
+
+    def flaky_replace(src, dst):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            raise PermissionError(5, "Access is denied", str(dst))
+        return original_replace(src, dst)
+
+    monkeypatch.setattr("src.failure_guard.os.replace", flaky_replace)
+
+    _atomic_write_json(str(guard_path), {"ok": True}, replace_retry_delay=0)
+
+    assert calls["count"] == 2
+    assert guard_path.read_text(encoding="utf-8").strip()
+
+
+def test_atomic_write_json_raises_after_replace_retries(tmp_path, monkeypatch):
+    guard_path = tmp_path / "guard.json"
+
+    def locked_replace(src, dst):
+        raise PermissionError(5, "Access is denied", str(dst))
+
+    monkeypatch.setattr("src.failure_guard.os.replace", locked_replace)
+
+    with pytest.raises(PermissionError):
+        _atomic_write_json(
+            str(guard_path),
+            {"ok": True},
+            replace_retries=2,
+            replace_retry_delay=0,
+        )

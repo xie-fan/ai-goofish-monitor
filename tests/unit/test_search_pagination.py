@@ -4,17 +4,20 @@ from playwright.async_api import TimeoutError as PlaywrightTimeoutError
 
 from src.services.search_pagination import advance_search_page
 from src.services.search_pagination import is_search_results_response
+from src.services.search_pagination import wait_for_initial_search_response
 
 
 class FakeRequest:
-    def __init__(self, method: str = "POST"):
+    def __init__(self, method: str = "POST", failure=None):
         self.method = method
+        self.failure = failure
 
 
 class FakeResponse:
-    def __init__(self, url: str, ok: bool = True, method: str = "POST"):
+    def __init__(self, url: str, ok: bool = True, method: str = "POST", status: int = 200):
         self.url = url
         self.ok = ok
+        self.status = status
         self.request = FakeRequest(method)
 
 
@@ -69,18 +72,51 @@ class FakePage:
         next_button_count: int,
         outcomes: list[object],
         click_error: Exception | None = None,
+        expected_timeout: int = 20000,
+        goto_events: list[tuple[str, object]] | None = None,
     ):
         self.locator_stub = FakeLocator(next_button_count, click_error=click_error)
         self._outcomes = list(outcomes)
+        self._expected_timeout = expected_timeout
+        self.goto_calls: list[dict] = []
+        self._goto_events = list(goto_events or [])
+        self._handlers: dict[str, list] = {}
+        self.url = "about:blank"
 
     def locator(self, _selector: str) -> FakeLocator:
         return self.locator_stub
 
     def expect_response(self, _predicate, timeout: int):
-        assert timeout == 20000
+        assert timeout == self._expected_timeout
         if not self._outcomes:
             raise AssertionError("missing fake response outcome")
         return FakeResponseContext(self._outcomes.pop(0))
+
+    def on(self, event: str, handler) -> None:
+        self._handlers.setdefault(event, []).append(handler)
+
+    def remove_listener(self, event: str, handler) -> None:
+        if event not in self._handlers:
+            return
+        self._handlers[event] = [item for item in self._handlers[event] if item is not handler]
+
+    async def goto(
+        self,
+        url: str,
+        wait_until: str,
+        timeout: int,
+    ) -> None:
+        self.url = url
+        self.goto_calls.append(
+            {"url": url, "wait_until": wait_until, "timeout": timeout}
+        )
+        if self._goto_events:
+            event, payload = self._goto_events.pop(0)
+            for handler in self._handlers.get(event, []):
+                handler(payload)
+
+    async def title(self) -> str:
+        return "Fake Search Page"
 
 
 async def _noop_random_sleep(_min_seconds: float, _max_seconds: float) -> None:
@@ -190,6 +226,108 @@ def test_advance_search_page_stops_when_click_times_out() -> None:
     assert result.stop_reason == "click_timeout"
     assert page.locator_stub.clicks == 1
     assert logs == ["第 2 页下一页按钮点击超时，停止翻页。"]
+
+
+def test_wait_for_initial_search_response_retries_after_timeout() -> None:
+    response = FakeResponse(
+        url="https://h5api.m.goofish.com/h5/mtop.taobao.idlemtopsearch.pc.search/1.0/?foo=bar"
+    )
+    page = FakePage(
+        next_button_count=0,
+        outcomes=[PlaywrightTimeoutError("initial search timeout"), response],
+        expected_timeout=30000,
+    )
+    logs: list[str] = []
+
+    result = asyncio.run(
+        wait_for_initial_search_response(
+            page=page,
+            search_url="https://www.goofish.com/search?q=mac+m1pro",
+            logger=logs.append,
+            retry_sleep=_noop_sleep,
+        )
+    )
+
+    assert result is response
+    assert [call["url"] for call in page.goto_calls] == [
+        "https://www.goofish.com/search?q=mac+m1pro",
+        "https://www.goofish.com/search?q=mac+m1pro",
+    ]
+    assert logs == [
+        "等待初始搜索响应超时，当前页面: https://www.goofish.com/search?q=mac+m1pro，5秒后重试..."
+    ]
+
+
+def test_wait_for_initial_search_response_logs_network_diagnostics_on_final_timeout() -> None:
+    observed_response = FakeResponse(
+        url="https://h5api.m.goofish.com/h5/mtop.taobao.idlemtopsearch.pc.searchv2/1.0/?foo=bar",
+        method="POST",
+        status=200,
+    )
+    page = FakePage(
+        next_button_count=0,
+        outcomes=[
+            PlaywrightTimeoutError("initial search timeout"),
+            PlaywrightTimeoutError("initial search timeout"),
+        ],
+        expected_timeout=30000,
+        goto_events=[("response", observed_response)],
+    )
+    logs: list[str] = []
+
+    try:
+        asyncio.run(
+            wait_for_initial_search_response(
+                page=page,
+                search_url="https://www.goofish.com/search?q=mac+m1pro",
+                logger=logs.append,
+                retry_sleep=_noop_sleep,
+            )
+        )
+    except PlaywrightTimeoutError:
+        pass
+
+    assert "初始搜索诊断: title=Fake Search Page url=https://www.goofish.com/search?q=mac+m1pro" in logs
+    assert "初始搜索阶段最近网络事件:" in logs
+    assert (
+        "  response POST 200 "
+        "https://h5api.m.goofish.com/h5/mtop.taobao.idlemtopsearch.pc.searchv2/1.0/?foo=bar"
+    ) in logs
+
+
+def test_wait_for_initial_search_response_logs_request_failure_text() -> None:
+    failed_request = FakeRequest(
+        method="GET",
+        failure="net::ERR_FAILED",
+    )
+    failed_request.url = "https://g.alicdn.com/mtb/lib-mtop/2.7.3/mtop.js"
+    page = FakePage(
+        next_button_count=0,
+        outcomes=[
+            PlaywrightTimeoutError("initial search timeout"),
+            PlaywrightTimeoutError("initial search timeout"),
+        ],
+        expected_timeout=30000,
+        goto_events=[("requestfailed", failed_request)],
+    )
+    logs: list[str] = []
+
+    try:
+        asyncio.run(
+            wait_for_initial_search_response(
+                page=page,
+                search_url="https://www.goofish.com/search?q=mac+m1pro",
+                logger=logs.append,
+                retry_sleep=_noop_sleep,
+            )
+        )
+    except PlaywrightTimeoutError:
+        pass
+
+    assert (
+        "  requestfailed GET https://g.alicdn.com/mtb/lib-mtop/2.7.3/mtop.js "
+        "error=net::ERR_FAILED"
+    ) in logs
 
 
 def test_is_search_results_response_matches_exact_search_api() -> None:

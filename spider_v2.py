@@ -5,7 +5,6 @@ import argparse
 import json
 import signal
 import contextlib
-import re
 
 from src.config import STATE_FILE
 from src.infrastructure.persistence.sqlite_task_repository import SqliteTaskRepository
@@ -50,7 +49,7 @@ async def main():
         if value is None:
             return []
         if isinstance(value, str):
-            raw_values = re.split(r"[\n,]+", value)
+            raw_values = value.splitlines()
         elif isinstance(value, (list, tuple, set)):
             raw_values = list(value)
         else:
@@ -73,7 +72,9 @@ async def main():
         merged = []
         for group in groups or []:
             if isinstance(group, dict):
-                merged.extend(normalize_keywords(group.get("include_keywords")))
+                group_keywords = normalize_keywords(group.get("include_keywords"))
+                if group_keywords:
+                    merged.append(", ".join(group_keywords))
         return normalize_keywords(merged)
 
     def has_bound_account(tasks: list) -> bool:

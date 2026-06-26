@@ -2,7 +2,6 @@
 任务领域模型
 定义任务实体及其业务逻辑
 """
-import re
 from enum import Enum
 from typing import Any, List, Literal, Optional
 
@@ -31,7 +30,7 @@ def _normalize_keyword_values(value) -> List[str]:
     if isinstance(value, (list, tuple, set)):
         raw_values = list(value)
     elif isinstance(value, str):
-        raw_values = re.split(r"[\n,]+", value)
+        raw_values = value.splitlines()
     else:
         raw_values = [value]
 
@@ -60,7 +59,9 @@ def _extract_keywords_from_legacy_groups(groups) -> List[str]:
             include_keywords = group.get("include_keywords") or []
         else:
             include_keywords = getattr(group, "include_keywords", []) or []
-        merged.extend(_normalize_keyword_values(include_keywords))
+        normalized_group = _normalize_keyword_values(include_keywords)
+        if normalized_group:
+            merged.append(", ".join(normalized_group))
     return _normalize_keyword_values(merged)
 
 

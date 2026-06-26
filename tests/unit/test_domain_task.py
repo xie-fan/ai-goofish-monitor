@@ -73,7 +73,7 @@ def test_legacy_keyword_groups_are_flattened_to_keyword_rules():
         is_running=False,
     )
 
-    assert task.keyword_rules == ["a7m4", "验货宝", "全画幅"]
+    assert task.keyword_rules == ["a7m4, 验货宝", "全画幅, a7m4"]
 
 
 def test_generate_request_accepts_legacy_group_payload():
@@ -84,7 +84,19 @@ def test_generate_request_accepts_legacy_group_payload():
         decision_mode="keyword",
         keyword_rule_groups=[{"include_keywords": ["a7m4", "验货宝"], "exclude_keywords": ["瑕疵"]}],
     )
-    assert req.keyword_rules == ["a7m4", "验货宝"]
+    assert req.keyword_rules == ["a7m4, 验货宝"]
+
+
+def test_keyword_rules_string_is_split_by_lines_not_commas():
+    req = TaskGenerateRequest(
+        task_name="grouped",
+        keyword="sony a7m4",
+        description="",
+        decision_mode="keyword",
+        keyword_rules="a7m4, 验货宝\nsony，个人闲置",
+    )
+
+    assert req.keyword_rules == ["a7m4, 验货宝", "sony，个人闲置"]
 
 
 def test_generate_request_enables_image_analysis_by_default():

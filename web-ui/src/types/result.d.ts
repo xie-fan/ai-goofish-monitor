@@ -45,6 +45,7 @@ export interface AiAnalysis {
   risk_tags?: string[];
   criteria_analysis?: Record<string, any>;
   matched_keywords?: string[];
+  matched_keyword_groups?: string[];
   error?: string;
 }
 

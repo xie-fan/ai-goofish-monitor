@@ -77,14 +77,14 @@ chmod +x start.sh
 git clone https://github.com/Usagi-org/ai-goofish-monitor && cd ai-goofish-monitor
 cp .env.example .env
 vim .env # fill in the required values
-docker compose up -d
+docker compose up -d --build
 docker compose logs -f app
 docker compose down
 ```
 
 - Default Web UI: `http://127.0.0.1:8000`
-- The published Docker image already includes Chromium, so no extra browser install is required on the host.
-- Update image: `docker compose pull && docker compose up -d`
+- The Docker image built by this compose file includes Chromium, so no extra browser install is required on the host.
+- The default `docker-compose.yaml` builds from the current checkout. After code changes, run: `docker compose up -d --build`
 - If you change `SERVER_PORT` in `.env`, update the `ports` mapping in `docker-compose.yaml` as well.
 - `docker-compose.yaml` now mounts the primary SQLite database directory as `./data:/app/data`, with the default database file at `data/app.sqlite3`
 - These paths are persisted by default:

@@ -29,24 +29,14 @@
 git clone https://github.com/Usagi-org/ai-goofish-monitor && cd ai-goofish-monitor
 cp .env.example .env
 vim .env # 填写相关配置项
-docker compose up -d
+docker compose up -d --build
 docker compose logs -f app
 docker compose down
 ```
 
-如果镜像无法访问或下载速度慢，可尝试使用加速：
-```bash
-
-docker pull ghcr.nju.edu.cn/usagi-org/ai-goofish:latest
-docker tag ghcr.nju.edu.cn/usagi-org/ai-goofish:latest ghcr.io/usagi-org/ai-goofish:latest
-docker compose up -d
-
-```
-
 - 默认 Web UI 地址：`http://127.0.0.1:8000`
 - Docker 镜像已内置 Chromium，无需宿主机额外安装浏览器。
-- 官方镜像地址：`ghcr.io/usagi-org/ai-goofish:latest`
-- 更新镜像：`docker compose pull && docker compose up -d`
+- 默认 `docker-compose.yaml` 会从当前代码构建镜像；代码更新后运行：`docker compose up -d --build`
 - 如果你修改了 `.env` 中的 `SERVER_PORT`，请同步更新 `docker-compose.yaml` 里的端口映射。
 - `docker-compose.yaml` 默认会把 SQLite 主库挂载到 `./data:/app/data`，数据库文件默认为 `data/app.sqlite3`
 - 目前默认持久化这些目录：

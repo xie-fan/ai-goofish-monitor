@@ -17,7 +17,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
 # 创建虚拟环境并安装 Python 运行时依赖
 RUN python3 -m venv $VIRTUAL_ENV
 COPY requirements-runtime.txt .
-RUN pip install --no-cache-dir -i https://pypi.tuna.tsinghua.edu.cn/simple -r requirements-runtime.txt
+RUN pip install --no-cache-dir -r requirements-runtime.txt
 
 # Stage 3: Create the final, lean image
 FROM python:3.11-slim-bookworm
